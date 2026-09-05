@@ -1,0 +1,36 @@
+{
+  "name": "repo-analyzer-backend",
+  "version": "0.1.0",
+  "description": "Repo-Analyzer backend: monolito modular en Node.js (ingesta, análisis estático, inferencia IA opcional, exportación).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "NODE_ENV=development tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "repo-analyzer",
+    "static-analysis",
+    "monolith"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "@typescript-eslint/eslint-plugin": "7.16.0",
+    "@typescript-eslint/parser": "7.16.0",
+    "eslint": "8.57.0",
+    "fast-check": "3.19.0",
+    "tsx": "4.23.13",
+    "typescript": "5.5.3",
+    "vitest": "3.2.7"
+  }
+}
