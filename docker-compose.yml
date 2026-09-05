@@ -1,0 +1,62 @@
+# Composición local de Repo-Analyzer.
+#
+# Levanta el proceso Node.js (monolito modular, unidad ejecutable única) junto a
+# PostgreSQL. El servicio de cómputo respeta el límite de recursos de nivel
+# reducido del MVP: 1 instancia, 1 GB de memoria y 1 vCPU (Requisito 14.3).
+#
+# Notas de diseño:
+# - El backend es una única unidad ejecutable accesible por su punto de entrada
+#   (Requisito 14.2). El límite de recursos se aplica a este servicio de cómputo.
+# - PostgreSQL persiste únicamente resultados/metadatos; nunca código fuente
+#   (Requisito 2.2). El código de entrada es transitorio.
+# - No se fija ninguna decisión abierta (proveedor de IA, plataforma de nube,
+#   mecanismo de cola/almacenamiento transitorio, descarga de GitHub).
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Requisito 14.3: límites de 1 GB de memoria y 1 vCPU (formato Compose v2).
+    mem_limit: 1g
+    cpus: 1.0
+    # Requisito 14.3: máximo 1 instancia de cómputo (forma declarativa).
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # El Proveedor_IA se configura por variable de entorno (Requisito 4.5).
+      # Se deja sin fijar (decisión abierta); vacío => la inferencia por IA se omite.
+      AI_PROVIDER: ""
+      DATABASE_URL: "postgres://repo_analyzer:repo_analyzer@db:5432/repo_analyzer"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: repo_analyzer
+      POSTGRES_PASSWORD: repo_analyzer
+      POSTGRES_DB: repo_analyzer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Migraciones aplicadas al inicializar la base de datos por primera vez.
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repo_analyzer -d repo_analyzer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

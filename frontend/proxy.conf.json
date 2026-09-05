@@ -1,0 +1,18 @@
+{
+  "/auth": {
+    "target": "http://localhost:3000",
+    "secure": false
+  },
+  "/analyses": {
+    "target": "http://localhost:3000",
+    "secure": false
+  },
+  "/preferences": {
+    "target": "http://localhost:3000",
+    "secure": false
+  },
+  "/health": {
+    "target": "http://localhost:3000",
+    "secure": false
+  }
+}
