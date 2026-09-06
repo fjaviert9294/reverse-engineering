@@ -21,7 +21,7 @@ import { AuthService } from './auth.service';
       <section class="tarjeta" aria-labelledby="titulo-login">
         <h1 id="titulo-login">Iniciar sesión</h1>
         <p class="descripcion">
-          Introduzca sus credenciales para acceder a Repo-Analyzer.
+          Introduzca sus credenciales
         </p>
 
         <form [formGroup]="form" (ngSubmit)="onSubmit()" novalidate>
@@ -61,16 +61,19 @@ import { AuthService } from './auth.service';
       .login {
         display: flex;
         justify-content: center;
-        align-items: flex-start;
-        padding: 2rem 1rem;
+        align-items: center;
+        width: 100%;
+        min-height: 80vh;
       }
 
       .tarjeta {
         width: 100%;
         max-width: 24rem;
-        padding: 1.5rem;
-        border: 1px solid #d0d0d0;
-        border-radius: 0.5rem;
+        padding: 2rem;
+        background: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        border-radius: 0.75rem;
+        box-shadow: 0 12px 32px rgba(15, 36, 68, 0.25);
       }
 
       h1 {

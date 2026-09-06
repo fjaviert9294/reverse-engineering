@@ -43,8 +43,10 @@ import { createServer, type ApiRouter } from './server.js';
 import {
   DefaultAuthService,
   InMemoryUserStore,
+  SqlUserStore,
   createDevelopmentDemoUser,
   type Clock as AuthClock,
+  type UserStore,
 } from './auth/index.js';
 import type { StoredUser } from './domain/index.js';
 
@@ -56,9 +58,14 @@ import {
   InMemoryJobRepository,
   InMemoryAnalysisResultRepository,
   InMemoryPreferenceRepository,
+  SqlJobRepository,
+  SqlAnalysisResultRepository,
+  SqlPreferenceRepository,
+  PgClientAdapter,
   type JobRepository,
   type AnalysisResultRepository,
   type PreferenceRepository,
+  type PgClient,
 } from './persistence/index.js';
 
 // Almacenamiento transitorio
@@ -73,6 +80,7 @@ import { TransientIngestionModule, type IngestionModule } from './ingestion/inde
 // Inferencia IA (opcional)
 import {
   DefaultAIInferenceModule,
+  createGroqProviderFromEnv,
   type AIInferenceModule,
   type AIProvider,
 } from './ai/index.js';
@@ -129,6 +137,22 @@ export interface WiredApplication {
   jobRepository: JobRepository;
   resultRepository: AnalysisResultRepository;
   preferenceRepository: PreferenceRepository;
+  /** Cliente PostgreSQL si la persistencia SQL está activa; null si es en memoria. */
+  pgClient: PgClient | null;
+}
+
+/**
+ * Resuelve el proveedor de IA concreto a partir del entorno (Requisito 4.5),
+ * sin fijar la decisión abierta en el resto del sistema. Actualmente reconoce
+ * `AI_PROVIDER=groq` (requiere `GROQ_API_KEY`). Devuelve `null` si no hay un
+ * proveedor concreto configurado, dejando la degradación elegante al módulo.
+ */
+function resolveAiProviderFromEnv(env: NodeJS.ProcessEnv): AIProvider | null {
+  const provider = env.AI_PROVIDER?.trim().toLowerCase();
+  if (provider === 'groq') {
+    return createGroqProviderFromEnv(env);
+  }
+  return null;
 }
 
 /**
@@ -161,11 +185,29 @@ export function createApplication(overrides: CompositionOverrides = {}): WiredAp
     transientStorage.readFile(jobId, relativePath);
 
   // --- Persistencia (solo resultados y metadatos; nunca código fuente) ---
-  const jobRepository = overrides.jobRepository ?? new InMemoryJobRepository();
+  // Si DATABASE_URL está definida, se usan los repositorios SQL sobre PostgreSQL
+  // (los datos sobreviven a reinicios y son consultables en la BD). En otro caso
+  // se cae a los respaldos en memoria del proceso único. Los overrides explícitos
+  // (pruebas / inyección directa) siempre tienen prioridad.
+  const databaseUrl = env.DATABASE_URL?.trim();
+  const pgClient: PgClient | null =
+    databaseUrl && databaseUrl.length > 0
+      ? new PgClientAdapter({ connectionString: databaseUrl })
+      : null;
+
+  const jobRepository =
+    overrides.jobRepository ??
+    (pgClient ? new SqlJobRepository(pgClient) : new InMemoryJobRepository());
   const resultRepository =
-    overrides.resultRepository ?? new InMemoryAnalysisResultRepository();
+    overrides.resultRepository ??
+    (pgClient
+      ? new SqlAnalysisResultRepository(pgClient)
+      : new InMemoryAnalysisResultRepository());
   const preferenceRepository =
-    overrides.preferenceRepository ?? new InMemoryPreferenceRepository();
+    overrides.preferenceRepository ??
+    (pgClient
+      ? new SqlPreferenceRepository(pgClient)
+      : new InMemoryPreferenceRepository());
 
   // --- Módulos de dominio (habilitables/deshabilitables, Requisito 14.1) ---
 
@@ -180,11 +222,18 @@ export function createApplication(overrides: CompositionOverrides = {}): WiredAp
   // Inferencia IA (opcional): con la IA deshabilitada, el pipeline degrada a solo
   // estático con aviso (Requisitos 14.5, 3.6). Con la IA habilitada, se usa el
   // módulo por defecto detrás de la abstracción de proveedor (decisión abierta #1).
+  // Resolución del proveedor de IA concreto (decisión abierta #1):
+  // 1) el override explícito tiene prioridad (pruebas / inyección directa);
+  // 2) si `AI_PROVIDER=groq` y hay `GROQ_API_KEY`, se usa Groq;
+  // 3) en otro caso, el proveedor nulo fuerza la degradación elegante.
+  const resolvedAiProvider: AIProvider =
+    overrides.aiProvider ?? resolveAiProviderFromEnv(env) ?? NULL_AI_PROVIDER;
+
   const aiModule: AIInferenceModule =
     overrides.aiModule ??
     (config.modules.aiInference
       ? new DefaultAIInferenceModule({
-          provider: overrides.aiProvider ?? NULL_AI_PROVIDER,
+          provider: resolvedAiProvider,
           env,
         })
       : createDisabledAIInferenceModule());
@@ -213,8 +262,22 @@ export function createApplication(overrides: CompositionOverrides = {}): WiredAp
   });
 
   // --- Autenticación ---
-  const defaultUsers = env.NODE_ENV === 'development' ? [createDevelopmentDemoUser()] : [];
-  const userStore = new InMemoryUserStore(overrides.users ?? defaultUsers);
+  const isDevelopment = env.NODE_ENV === 'development';
+  const defaultUsers = isDevelopment ? [createDevelopmentDemoUser()] : [];
+  let userStore: UserStore;
+  if (overrides.users !== undefined) {
+    // Usuarios inyectados explícitamente (pruebas): siempre en memoria.
+    userStore = new InMemoryUserStore(overrides.users);
+  } else if (pgClient) {
+    // Persistencia SQL: los usuarios viven en la tabla `usuario`. En desarrollo
+    // se siembra el usuario demo (best-effort, sin bloquear el arranque).
+    userStore = new SqlUserStore(pgClient);
+    if (isDevelopment) {
+      void seedDevelopmentDemoUser(pgClient);
+    }
+  } else {
+    userStore = new InMemoryUserStore(defaultUsers);
+  }
   const authService = new DefaultAuthService(userStore, overrides.authClock);
 
   // --- Router de análisis (Task 15.2) ---
@@ -244,5 +307,30 @@ export function createApplication(overrides: CompositionOverrides = {}): WiredAp
     jobRepository,
     resultRepository,
     preferenceRepository,
+    pgClient,
   };
+}
+
+/**
+ * Siembra el usuario demo de desarrollo en la tabla `usuario` (upsert idempotente)
+ * cuando la persistencia SQL está activa. Es best-effort: cualquier fallo se
+ * registra pero no impide el arranque del servidor. Nunca guarda la contraseña en
+ * claro (usa el hash de `createDevelopmentDemoUser`).
+ */
+async function seedDevelopmentDemoUser(pgClient: PgClient): Promise<void> {
+  const demo = createDevelopmentDemoUser();
+  try {
+    await pgClient.query(
+      `INSERT INTO usuario (username, password_hash, failed_attempts, locked_until)
+       VALUES ($1, $2, 0, NULL)
+       ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
+      [demo.username, demo.passwordHash],
+    );
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[persistencia] No se pudo sembrar el usuario demo de desarrollo:',
+      error instanceof Error ? error.message : error,
+    );
+  }
 }

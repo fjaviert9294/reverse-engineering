@@ -1,0 +1,453 @@
+openapi: 3.0.3
+info:
+  title: Analyzer API
+  version: 0.1.0
+  description: >
+    API del backend de Repo-Analyzer (monolito modular Node.js). Analiza
+    repositorios de código fuente públicos (ZIP subido o URL de GitHub) de forma
+    asíncrona y devuelve resultados de análisis (explicación funcional,
+    componentes clave, arquitectura inferida y hallazgos adicionales). El código
+    fuente es transitorio y nunca se persiste; solo se guardan resultados y
+    metadatos.
+
+    Autenticación por token de sesión Bearer obtenido en POST /auth/login. Las
+    sesiones expiran a los 60 segundos.
+servers:
+  - url: http://localhost:3000
+    description: Desarrollo local (docker compose / npm run dev)
+
+tags:
+  - name: Salud
+  - name: Autenticación
+  - name: Preferencias
+  - name: Análisis
+
+paths:
+  /health:
+    get:
+      tags: [Salud]
+      summary: Sonda de salud del servicio
+      operationId: getHealth
+      description: Punto de entrada de salud. `GET /` se comporta igual.
+      security: []
+      responses:
+        '200':
+          description: Servicio operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string, example: repo-analyzer }
+                  status: { type: string, example: ok }
+                  message: { type: string, example: Repo-Analyzer backend operativo. }
+
+  /auth/login:
+    post:
+      tags: [Autenticación]
+      summary: Iniciar sesión
+      operationId: login
+      description: >
+        Autenticación básica con usuario y contraseña. Devuelve un token de
+        sesión. Ante credenciales inválidas o cuenta bloqueada responde 401 con
+        un mensaje genérico que no revela qué campo fue incorrecto.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              demo:
+                summary: Usuario demo (solo en NODE_ENV=development)
+                value: { username: demo, password: demo1234 }
+      responses:
+        '200':
+          description: Credenciales válidas; sesión establecida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginOk'
+        '400':
+          description: Cuerpo JSON inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Credenciales inválidas, ausentes o cuenta bloqueada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: credenciales_invalidas }
+                  message: { type: string, example: Usuario o contraseña incorrectos. }
+
+  /preferences/ai:
+    put:
+      tags: [Preferencias]
+      summary: Activar o desactivar el uso de IA del usuario
+      operationId: setAiPreference
+      description: >
+        Conserva la preferencia de uso de IA del usuario autenticado, que se
+        aplica en análisis posteriores hasta que la modifique. Ruta protegida.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [useAI]
+              properties:
+                useAI: { type: boolean }
+      responses:
+        '200':
+          description: Preferencia guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  useAI: { type: boolean }
+        '400':
+          description: Campo useAI ausente o no booleano
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Sesión ausente o inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /analyses:
+    post:
+      tags: [Análisis]
+      summary: Crear un análisis (procesamiento asíncrono)
+      operationId: createAnalysis
+      description: >
+        Recibe EXACTAMENTE una entrada: un archivo ZIP (contenido en base64) o
+        una URL de repositorio de GitHub. Crea el job, lo encola y responde 202
+        de inmediato con el jobId, sin bloquear. Aportar ninguna o ambas entradas
+        se rechaza con 400. Una URL de GitHub mal formada se rechaza con 400 y no
+        inicia el análisis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnalysisRequest'
+            examples:
+              github:
+                summary: Análisis por URL de GitHub con IA
+                value: { url: 'https://github.com/usuario/repo.git', useAI: true }
+              zip:
+                summary: Análisis por ZIP subido (base64)
+                value: { zip: 'UEsDBBQAAAAI...', useAI: false }
+      responses:
+        '202':
+          description: Análisis aceptado y encolado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: aceptado }
+                  jobId: { type: string, format: uuid }
+        '400':
+          description: Entrada inválida (ninguna/ambas entradas, URL inválida, base64 inválido, useAI no booleano, JSON inválido)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Sesión ausente o inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /analyses/{id}/status:
+    get:
+      tags: [Análisis]
+      summary: Consultar estado y progreso de un análisis
+      operationId: getAnalysisStatus
+      parameters:
+        - $ref: '#/components/parameters/AnalysisId'
+      responses:
+        '200':
+          description: Estado actual del job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  jobId: { type: string, format: uuid }
+                  jobStatus: { $ref: '#/components/schemas/JobStatus' }
+                  progress: { type: integer, minimum: 0, maximum: 100 }
+                  stage: { $ref: '#/components/schemas/AnalysisStage' }
+                  errorModule:
+                    type: string
+                    nullable: true
+                    example: null
+        '401':
+          description: Sesión ausente o inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Análisis no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /analyses/{id}:
+    get:
+      tags: [Análisis]
+      summary: Obtener el resultado de un análisis
+      operationId: getAnalysisResult
+      parameters:
+        - $ref: '#/components/parameters/AnalysisId'
+      responses:
+        '200':
+          description: Resultado del análisis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  result: { $ref: '#/components/schemas/AnalysisResult' }
+        '401':
+          description: Sesión ausente o inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Resultado no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /analyses/{id}/export:
+    post:
+      tags: [Análisis]
+      summary: Exportar el resultado a Markdown
+      operationId: exportAnalysis
+      parameters:
+        - $ref: '#/components/parameters/AnalysisId'
+      responses:
+        '200':
+          description: Documento Markdown generado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  filename: { type: string, example: analisis.md }
+                  mediaType: { type: string, example: text/markdown }
+                  content: { type: string }
+        '401':
+          description: Sesión ausente o inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Resultado no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Resultado vacío; no se puede exportar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Fallo al generar la exportación
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token de sesión devuelto por POST /auth/login. Expira a los 60 s.
+
+  parameters:
+    AnalysisId:
+      name: id
+      in: path
+      required: true
+      description: Identificador del análisis (coincide con el jobId).
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Error:
+      type: object
+      description: Forma común de error de la API.
+      properties:
+        status: { type: string, example: no_encontrado }
+        message: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    LoginOk:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        token: { type: string }
+        userId: { type: string, format: uuid }
+        username: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    CreateAnalysisRequest:
+      type: object
+      description: >
+        Debe incluir exactamente uno de `zip` o `url`. `useAI` es opcional
+        (por defecto false, privacidad por defecto).
+      properties:
+        zip:
+          type: string
+          description: Contenido del archivo ZIP codificado en base64.
+        url:
+          type: string
+          description: URL de un repositorio público de GitHub.
+        useAI:
+          type: boolean
+          default: false
+
+    JobStatus:
+      type: string
+      enum: [EN_COLA, EN_PROGRESO, COMPLETADO, FALLIDO]
+
+    AnalysisStage:
+      type: string
+      enum: [INGESTA, ANALISIS_ESTATICO, INFERENCIA_IA, PERSISTENCIA, FINALIZADO]
+
+    SupportedLanguage:
+      type: string
+      enum: [JAVA, TYPESCRIPT, JAVASCRIPT, PYTHON]
+
+    AnalysisMode:
+      type: string
+      enum: [SOLO_ESTATICO, ESTATICO_MAS_IA]
+
+    FindingCategoryStatus:
+      type: string
+      enum: [CON_HALLAZGOS, SIN_HALLAZGOS, NO_ANALIZABLE]
+
+    FunctionalSummary:
+      type: object
+      properties:
+        summary: { type: string }
+        confidencePct: { type: integer, minimum: 0, maximum: 100 }
+        determined: { type: boolean }
+
+    KeyComponent:
+      type: object
+      properties:
+        path: { type: string }
+        category:
+          type: string
+          enum: [modulo, servicio, controlador, modelo, punto_de_entrada, configuracion]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+        inferred: { type: boolean }
+
+    ArchitectureInference:
+      type: object
+      properties:
+        type:
+          type: string
+          nullable: true
+          enum: [monolito, microservicios, mvc, hexagonal, por_capas, otro]
+        confidencePct: { type: integer, minimum: 0, maximum: 100 }
+        determined: { type: boolean }
+        evidence: { type: string }
+
+    Vulnerability:
+      type: object
+      properties:
+        location: { type: string }
+        severity: { type: string }
+
+    OutdatedDep:
+      type: object
+      properties:
+        name: { type: string }
+        detectedVersion: { type: string }
+        latestVersion: { type: string }
+
+    ApiEndpoint:
+      type: object
+      properties:
+        path: { type: string }
+        method: { type: string }
+
+    AdditionalFindings:
+      type: object
+      properties:
+        vulnerabilities:
+          type: object
+          properties:
+            status: { $ref: '#/components/schemas/FindingCategoryStatus' }
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Vulnerability' }
+        outdatedDependencies:
+          type: object
+          properties:
+            status: { $ref: '#/components/schemas/FindingCategoryStatus' }
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/OutdatedDep' }
+        apiEndpoints:
+          type: object
+          properties:
+            status: { $ref: '#/components/schemas/FindingCategoryStatus' }
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ApiEndpoint' }
+
+    AnalysisResult:
+      type: object
+      description: Resultado del análisis. No contiene código fuente, solo resultados y metadatos.
+      properties:
+        id: { type: string, format: uuid }
+        jobId: { type: string, format: uuid }
+        primaryLanguage:
+          type: string
+          nullable: true
+          enum: [JAVA, TYPESCRIPT, JAVASCRIPT, PYTHON]
+        secondaryLanguages:
+          type: array
+          items: { $ref: '#/components/schemas/SupportedLanguage' }
+        analysisMode: { $ref: '#/components/schemas/AnalysisMode' }
+        functionalSummary: { $ref: '#/components/schemas/FunctionalSummary' }
+        keyComponents:
+          type: array
+          items: { $ref: '#/components/schemas/KeyComponent' }
+        architecture: { $ref: '#/components/schemas/ArchitectureInference' }
+        additionalFindings: { $ref: '#/components/schemas/AdditionalFindings' }
+        configReadNotes:
+          type: array
+          items: { type: string }
+        notices:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []

@@ -8,6 +8,25 @@ html,
 body {
   margin: 0;
   padding: 0;
+  min-height: 100vh;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
+  color: #0f2444;
+}
+
+/* Fondo con gradiente azul aplicado a toda la aplicación. */
+body {
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #38bdf8 100%);
+  background-attachment: fixed;
+}
+
+/* El componente raíz centra su contenido (login o área protegida). */
+app-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  width: 100%;
+  padding: 2rem 1rem;
 }

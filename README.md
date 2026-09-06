@@ -2,19 +2,17 @@
 
 Aplicación web que analiza repositorios de código fuente públicos y genera
 documentación automática (explicación funcional, componentes clave, arquitectura
-inferida y hallazgos adicionales). Se implementa como un **monolito modular en
-Node.js** con procesamiento asíncrono, frontend Angular en español y persistencia
+inferida y hallazgos adicionales). Se implementa como un app con arquitectura **monolito modular en
+Node.js** con procesamiento asíncrono, frontend Angular y persistencia
 en PostgreSQL (solo resultados; el código fuente es transitorio).
-
-Ver la especificación en `.kiro/specs/repo-analyzer/` (requirements, design, tasks).
 
 ## Estructura del monorepo
 
 ```
 .
 ├── backend/    # Monolito modular Node.js + TypeScript (API/Auth, módulos de dominio)
-├── frontend/   # Interfaz_Web en Angular (dashboard en español, responsive)
-├── db/         # Migraciones/esquema PostgreSQL (solo resultados, nunca código)
+├── frontend/   # Interfaz_Web en Angular (dashboard responsive)
+├── db/         # Migraciones/esquema PostgreSQL (solo se mapean resultados del análisis)
 └── docker-compose.yml  # Composición local: Node.js + PostgreSQL (1 instancia, 1 GB, 1 vCPU)
 ```
 
@@ -59,9 +57,6 @@ npm start          # arranca el servidor HTTP (GET / y GET /health -> 200)
 ```
 
 El servidor responde en `http://localhost:3000/` y `http://localhost:3000/health`
-(Requisito 14.2). El punto de entrada (`src/index.ts`) usa el composition root
-`createApplication`, que cablea todos los componentes —API/Auth, cola/worker,
-módulos de dominio, persistencia y almacenamiento transitorio— en este mismo proceso.
 
 > Nota: la Opción B usa por defecto la persistencia en memoria del proceso único
 > (los datos no sobreviven a un reinicio). Para persistir en PostgreSQL, usa la
@@ -84,8 +79,10 @@ persiste en PostgreSQL.
 | `NODE_ENV`                       | —           | `development` carga el usuario demo; `production` lo deshabilita.  |
 | `PORT`                           | `3000`      | Puerto de escucha del servidor HTTP.                               |
 | `HOST`                           | `0.0.0.0`   | Interfaz de escucha.                                               |
-| `DATABASE_URL`                   | —           | Cadena de conexión a PostgreSQL (usada en la composición Docker).  |
-| `AI_PROVIDER`                    | vacío       | Proveedor de IA (Req 4.5). Vacío => la inferencia por IA se omite. |
+| `DATABASE_URL`                   | —           | Conexión a PostgreSQL. Definida => persiste en BD; vacía => memoria.|
+| `AI_PROVIDER`                    | vacío       | Proveedor de IA (Req 4.5). `groq` activa Groq; vacío lo omite.     |
+| `GROQ_API_KEY`                   | —           | Clave de API de Groq (requerida si `AI_PROVIDER=groq`).            |
+| `GROQ_MODEL`                     | `llama-3.3-70b-versatile` | Modelo de Groq a usar (opcional).                    |
 | `MODULE_INGESTION_ENABLED`       | `true`      | Habilita/deshabilita el módulo de Ingesta.                         |
 | `MODULE_STATIC_ANALYSIS_ENABLED` | `true`      | Habilita/deshabilita el módulo de Análisis Estático.               |
 | `MODULE_AI_ENABLED`              | `true`      | Habilita/deshabilita la Inferencia IA (Req 14.5).                  |
@@ -118,6 +115,20 @@ npm run lint       # ESLint
 npm run typecheck  # verificación de tipos sin emitir
 ```
 
+### Documentación de la API (OpenAPI / Swagger)
+
+El contrato de la API está en `backend/openapi.yaml` (OpenAPI 3.0). Para
+explorarlo de forma interactiva:
+
+```bash
+cd backend
+npm run docs:api        # abre una vista interactiva de la API en el navegador
+npm run docs:api:lint   # valida el spec OpenAPI
+```
+
+También puedes pegar el contenido de `openapi.yaml` en https://editor.swagger.io
+para verlo con Swagger UI.
+
 ## Frontend
 
 Angular 20 (standalone). Runner de pruebas: **Karma + Jasmine** (runner estándar de Angular).
@@ -137,14 +148,83 @@ relativas (p. ej. `/auth/login`) y las peticiones llegan al backend real en luga
 de quedarse en el propio servidor de Angular. Para probar el flujo completo,
 arranca primero el backend (Opción B más arriba) y luego el frontend.
 
+## Inferencia por IA (opcional, Groq)
+
+La inferencia por IA está deshabilitada por defecto (privacidad por defecto,
+Requisitos 4.1, 4.2). El proveedor concreto se resuelve por variable de entorno
+(Requisito 4.5) detrás de la abstracción `AIProvider`, sin acoplar el resto del
+sistema. Actualmente se incluye un proveedor para los modelos de **Groq** (API
+de Chat Completions compatible con OpenAI).
+
+Para activarla necesitas una clave de API de Groq (obtenla en GroqCloud).
+
+**Opción recomendada: archivo `.env` (para `docker compose up`).** Docker
+Compose carga automáticamente un archivo `.env` en la raíz del proyecto, así que
+basta con crearlo una vez a partir de la plantilla y levantar los servicios:
+
+```bash
+# edita .env y pon tu GROQ_API_KEY
+docker compose up --build
+```
+
+**Backend local (sin Docker).** Exporta las variables en tu shell y arranca:
+
+```bash
+export AI_PROVIDER=groq
+export GROQ_API_KEY=tu_clave
+# opcional: export GROQ_MODEL=llama-3.3-70b-versatile
+cd backend && npm run dev
+```
+
+También puedes pasar las variables en línea a Compose sin usar `.env`:
+
+```bash
+AI_PROVIDER=groq GROQ_API_KEY=tu_clave docker compose up --build
+```
+
+Requisitos de comportamiento respetados:
+
+- El código fuente solo se envía al proveedor cuando el análisis solicita IA
+  (`useAI: true`) y la privacidad lo permite (Requisitos 4.3, 4.4). Es transitorio
+  y nunca se persiste (Requisito 2.2).
+- Si `AI_PROVIDER` está vacío o falta `GROQ_API_KEY`, la inferencia se omite y
+  el resultado indica que la IA no se aplicó (Requisitos 4.5, 4.6).
+- Si Groq falla, el análisis degrada a solo estático con aviso (Requisitos 3.6,
+  14.5); el fallo del módulo de IA no interrumpe el resto del pipeline.
+
 ## Base de datos
 
 `db/migrations/` contiene los scripts SQL aplicados en orden. La composición local
 los monta en la inicialización de PostgreSQL. PostgreSQL persiste únicamente
-resultados/metadatos; nunca código fuente (Requisito 2.2).
+resultados/metadatos;
 
-## Decisiones abiertas
+### Persistencia: PostgreSQL o en memoria
 
-El proveedor de IA, la plataforma de nube, el mecanismo de cola/almacenamiento
-transitorio y el mecanismo de descarga de GitHub se mantienen tras interfaces y
-no se fijan en este andamiaje.
+El backend elige el respaldo de persistencia según la variable de entorno
+`DATABASE_URL`:
+
+- **Con `DATABASE_URL` definida** (caso de Docker Compose): usa PostgreSQL. Los
+  usuarios, jobs, resultados y preferencias se guardan en la BD y sobreviven a
+  reinicios. En desarrollo, el usuario demo se siembra en la tabla `usuario`.
+- **Sin `DATABASE_URL`** (p. ej. backend local con `npm run dev`): usa
+  repositorios en memoria; los datos no sobreviven a un reinicio.
+
+Para consultar la BD del contenedor:
+
+```bash
+docker compose exec db psql -U repo_analyzer -d repo_analyzer -c "SELECT id, status, stage, progress FROM analysis_job ORDER BY created_at DESC LIMIT 10;"
+```
+
+Las credenciales de la BD se parametrizan por `.env` (`POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`); ver `.env.example`. Por
+defecto son `repo_analyzer` / `repo_analyzer` / `repo_analyzer` y el puerto
+`5432`.
+
+El puerto de PostgreSQL se publica al host, así que puedes conectarte con un
+cliente gráfico (DBeaver, TablePlus, pgAdmin) usando:
+
+- Host: `localhost`
+- Puerto: `5432` (o el valor de `POSTGRES_PORT`)
+- Base de datos / usuario / contraseña: los de tu `.env`
+
+

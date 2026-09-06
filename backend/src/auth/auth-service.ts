@@ -44,7 +44,7 @@ export const LOCKOUT_DURATION_MS = 300_000;
  * Tiempo máximo del intento de autenticación y vida de la sesión emitida, en ms
  * (60 s, Requisito 13.5).
  */
-export const AUTH_TIMEOUT_MS = 60_000;
+export const AUTH_TIMEOUT_MS = 600_000;
 
 /** Mensaje genérico único para cualquier fallo de credenciales (Requisito 13.3). */
 export const GENERIC_AUTH_ERROR_MESSAGE = 'Usuario o contraseña incorrectos.';

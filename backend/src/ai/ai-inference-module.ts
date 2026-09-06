@@ -132,7 +132,11 @@ export class DefaultAIInferenceModule implements AIInferenceModule {
     //    (Requisito 4.4). Fallo del proveedor -> degradación (Requisitos 3.6, 14.5).
     try {
       return await this.provider.infer(input);
-    } catch {
+    } catch (error) {
+      // El mensaje al usuario es genérico (Requisito 3.6), pero registramos el
+      // motivo real en el servidor para poder diagnosticar el fallo del proveedor.
+      // eslint-disable-next-line no-console
+      console.error('[IA] Fallo del proveedor de IA:', error instanceof Error ? error.message : error);
       return unavailable('PROVEEDOR_FALLO');
     }
   }

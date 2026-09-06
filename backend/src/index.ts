@@ -11,7 +11,7 @@ import { createApplication } from './composition.js';
  * de módulo (Requisito 14.1) y la degradación elegante de la IA (Requisito 14.5).
  */
 function main(): void {
-  const { server, config } = createApplication();
+  const { server, config, pgClient } = createApplication();
 
   server.listen(config.port, config.host, () => {
     // eslint-disable-next-line no-console
@@ -21,12 +21,18 @@ function main(): void {
       `Módulos: ingesta=${config.modules.ingestion}, análisisEstático=${config.modules.staticAnalysis}, ` +
         `IA=${config.modules.aiInference}, exportación=${config.modules.export}`,
     );
+    // eslint-disable-next-line no-console
+    console.log(`Persistencia: ${pgClient ? 'PostgreSQL (DATABASE_URL)' : 'en memoria'}`);
   });
 
   const shutdown = (signal: string): void => {
     // eslint-disable-next-line no-console
     console.log(`Recibida señal ${signal}, cerrando el servidor...`);
-    server.close(() => process.exit(0));
+    server.close(() => {
+      // Cierre ordenado del pool de PostgreSQL si la persistencia SQL está activa.
+      const closable = pgClient as { close?: () => Promise<void> } | null;
+      void Promise.resolve(closable?.close?.()).finally(() => process.exit(0));
+    });
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
