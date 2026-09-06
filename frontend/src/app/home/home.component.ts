@@ -27,7 +27,7 @@ import { AnalysisResult } from '../analysis/analysis-result.model';
   template: `
     <main class="home">
       <header class="cabecera">
-        <h1>Repo-Analyzer</h1>
+        <h1>Reverse engineering</h1>
         <button type="button" (click)="cerrarSesion()">Cerrar sesión</button>
       </header>
       <p>Sesión iniciada como <strong>{{ nombreUsuario() }}</strong>.</p>
@@ -52,7 +52,13 @@ import { AnalysisResult } from '../analysis/analysis-result.model';
   styles: [
     `
       .home {
-        padding: 1rem;
+        width: 100%;
+        max-width: 60rem;
+        margin: 0 auto;
+        padding: 2rem;
+        background: #ffffff;
+        border-radius: 0.75rem;
+        box-shadow: 0 12px 32px rgba(15, 36, 68, 0.25);
       }
 
       .cabecera {

@@ -1,10 +1,6 @@
 # Base de datos (PostgreSQL)
 
-Esta carpeta contiene el esquema y las migraciones de PostgreSQL de Repo-Analyzer.
-
-Solo se persisten **resultados de análisis y metadatos** (jobs, usuarios,
-preferencias). **Nunca** se almacena el código fuente del repositorio
-(Requisito 2.2); el código es transitorio y se descarta al finalizar el job.
+Esta carpeta contiene el esquema y las migraciones de PostgreSQL.
 
 ## Estructura
 
@@ -28,12 +24,3 @@ preferencias). **Nunca** se almacena el código fuente del repositorio
 Las migraciones se aplican en orden lexicográfico. En despliegue local, se montan
 en `docker-entrypoint-initdb.d` (ver `docker-compose.yml`), de modo que Postgres
 las ejecuta en orden (`0001` y luego `0002`) al inicializar la base de datos.
-
-### Invariante de esquema (Requisito 2.2)
-
-Ninguna columna almacena contenido del código fuente. Las relaciones 1:1
-(`preferencia`, `functional_summary`, `architecture_inference`) comparten clave
-primaria con su tabla padre; la relación 0..1 entre `analysis_job` y
-`analysis_result` se garantiza con una restricción `UNIQUE` sobre `job_id`. Los
-valores de dominio (estados, etapas, lenguajes, categorías, tipos de arquitectura)
-se restringen con `CHECK` acorde al contrato de tipos del diseño.

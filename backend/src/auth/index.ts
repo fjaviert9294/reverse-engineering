@@ -16,6 +16,7 @@ export {
   type Clock,
 } from './auth-service.js';
 export { InMemoryUserStore, type UserStore } from './user-store.js';
+export { SqlUserStore } from './sql-user-store.js';
 
 export {
   createDevelopmentDemoUser,

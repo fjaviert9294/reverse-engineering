@@ -30,3 +30,10 @@ export {
   createDisabledAIInferenceModule,
   AI_DISABLED_NOTICE,
 } from './disabled-ai-module.js';
+export {
+  GroqProvider,
+  createGroqProviderFromEnv,
+  GROQ_API_KEY_ENV_VAR,
+  GROQ_DEFAULT_MODEL,
+  type GroqProviderOptions,
+} from './groq-provider.js';

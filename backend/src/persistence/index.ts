@@ -28,3 +28,4 @@ export {
   InMemoryAnalysisResultRepository,
   InMemoryPreferenceRepository,
 } from './in-memory-repositories.js';
+export { PgClientAdapter, type PgClientAdapterOptions } from './pg-client.js';

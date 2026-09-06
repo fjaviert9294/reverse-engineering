@@ -1,5 +1,5 @@
 /**
- * Explicación funcional heurística del Módulo de Análisis Estático (Task 8.7).
+ * Explicación funcional heurística del Módulo de Análisis Estático.
  *
  * Produce un `FunctionalSummary` que describe el propósito principal y las
  * funcionalidades del repositorio a partir únicamente de señales estructurales
